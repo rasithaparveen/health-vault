@@ -73,6 +73,8 @@ export interface MedicalReport {
   fileUrl: string;
   fileType: string;
   notes?: string;
+  parsedData?: Record<string, any>;
+  originalText?: string;
   tags: string[];
   createdAt: string;
 }

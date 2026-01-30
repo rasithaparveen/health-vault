@@ -107,7 +107,97 @@ export const reportsAPI = {
   createReport: (report: Omit<MedicalReport, 'id' | 'createdAt'>) => apiRequest('/reports', {
     method: 'POST',
     body: JSON.stringify(report),
-  }),
+  }),  uploadReportFile: async (memberId: string, file: File, meta?: { title?: string; date?: string; type?: string; notes?: string }) => {
+    const url = `${API_BASE_URL}/reports/upload`;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('memberId', memberId);
+    if (meta?.title) form.append('title', meta.title);
+    if (meta?.date) form.append('date', meta.date);
+    if (meta?.type) form.append('type', meta.type);
+    if (meta?.notes) form.append('notes', meta.notes);
+
+    const headers: Record<string, string> = {};
+    const token = localStorage.getItem('auth_token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: form,
+      headers,
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new ApiError(data.error || 'Upload failed', response.status);
+    return data;
+  },
+
+  translateReport: async (reportId: string, lang: string, force = false) => {
+    const token = localStorage.getItem('auth_token');
+    const res = await fetch(`${API_BASE_URL}/reports/${reportId}/translate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ lang, force })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new ApiError(data.error || 'Translation failed', res.status);
+    return data;
+  },
+
+  // Queue LLM (Gemini) summarization in background
+  summarizeLLM: async (reportId: string, consent = false) => {
+    const token = localStorage.getItem('auth_token');
+    const res = await fetch(`${API_BASE_URL}/reports/${reportId}/summarize-llm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ consent })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new ApiError(data.error || 'Summarize LLM failed', res.status);
+    return data;
+  },
+
+  // Translate arbitrary text(s) via /api/translate
+  translateText: async (texts: string[] | string, lang = 'ta') => {
+    const token = localStorage.getItem('auth_token');
+    const body: any = { lang };
+    if (Array.isArray(texts)) body.texts = texts;
+    else body.text = texts;
+
+    const res = await fetch(`${API_BASE_URL}/translate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new ApiError(data.error || 'Translation failed', res.status);
+    return data;
+  },
+
+  generateSummary: async (reportId: string) => {
+    const token = localStorage.getItem('auth_token');
+    const res = await fetch(`${API_BASE_URL}/reports/${reportId}/summarize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new ApiError(data.error || 'Generate summary failed', res.status);
+    return data;
+  },
+
   updateReport: (id: string, updates: Partial<MedicalReport>) => apiRequest(`/reports/${id}`, {
     method: 'PUT',
     body: JSON.stringify(updates),
@@ -177,4 +267,4 @@ export const doctorNotesAPI = {
   }),
 };
 
-export { ApiError };
+export { ApiError, API_BASE_URL };

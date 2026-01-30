@@ -28,6 +28,10 @@ const medicalReportSchema = new mongoose.Schema({
     required: true
   },
   notes: String,
+  parsedData: mongoose.Schema.Types.Mixed,
+  originalText: String,
+  // translations: { "ta": { text: String, parsedData: Mixed, translatedAt: Date } }
+  translations: mongoose.Schema.Types.Mixed,
   tags: [{
     type: String
   }],

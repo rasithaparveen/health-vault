@@ -11,11 +11,14 @@ import { useFamily } from '@/contexts/FamilyContext';
 import type { MedicalReport } from '@/types/health';
 import { Plus, FileText, Download, Eye, Trash2, Upload, Calendar, Tag } from 'lucide-react';
 import { formatDate, storage } from '@/lib/storage';
+import { reportsAPI, API_BASE_URL } from '@/lib/api';
 
 export default function Reports() {
   const { activeMember } = useFamily();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<MedicalReport | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     type: 'lab' as MedicalReport['type'],
@@ -35,6 +38,25 @@ export default function Reports() {
       notes: '',
       tags: '',
     });
+  };
+
+  const handleTranslate = async (reportId: string, lang: string) => {
+    try {
+      const payload = await reportsAPI.translateReport(reportId, lang);
+      // Update local storage reports
+      const data = storage.getData();
+      data.reports = data.reports.map(r => r.id === reportId ? ({ ...r, translations: { ...(r.translations || {}), [lang]: payload } }) : r);
+      storage.setData(data);
+    } catch (err) {
+      console.error('Translate failed', err);
+      alert('Translation failed. See console for details.');
+    }
+  };
+
+  const copyOriginal = (report: MedicalReport) => {
+    if (!report.originalText) return alert('No original text to copy');
+    navigator.clipboard?.writeText(report.originalText);
+    alert('Original extracted text copied to clipboard');
   };
 
   const handleAddReport = () => {
@@ -68,6 +90,42 @@ export default function Reports() {
     resetForm();
   };
 
+  const handleUploadAndParse = async () => {
+    if (!selectedFile || !activeMember) return;
+    setIsUploading(true);
+    try {
+      await reportsAPI.uploadReportFile(activeMember.id, selectedFile, {
+        title: formData.title || selectedFile.name,
+        date: formData.date || new Date().toISOString(),
+        type: formData.type,
+        notes: formData.notes,
+      });
+
+      // Refresh reports from backend and update local storage
+      const serverReports = await reportsAPI.getReports(activeMember.id);
+      const data = storage.getData();
+      // Remove current member's reports and replace
+      data.reports = data.reports.filter(r => r.memberId !== activeMember.id).concat(serverReports as any);
+      storage.setData(data);
+
+      storage.logActivity({
+        action: 'create',
+        entityType: 'report',
+        entityId: 'import',
+        description: `Uploaded medical report: ${selectedFile.name}`,
+      });
+
+      setIsAddDialogOpen(false);
+      resetForm();
+      setSelectedFile(null);
+    } catch (err) {
+      console.error('Upload failed', err);
+      alert('Upload failed. See console for details.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleDeleteReport = (reportId: string) => {
     if (confirm('Are you sure you want to delete this report?')) {
       const data = storage.getData();
@@ -80,6 +138,53 @@ export default function Reports() {
         entityId: reportId,
         description: 'Deleted medical report',
       });
+    }
+  };
+
+  const handleViewReport = (report: MedicalReport) => {
+    if (!report.fileUrl) return alert('No file available');
+    const base = (window as any).__API_BASE_URL || API_BASE_URL;
+    const url = report.fileUrl.startsWith('http') ? report.fileUrl : `${base}${report.fileUrl}`;
+    window.open(url, '_blank');
+  };
+
+  const handleDownloadReport = async (report: MedicalReport) => {
+    if (!report.fileUrl) return alert('No file available');
+    try {
+      const url = `${(window as any).__API_BASE_URL || ''}${report.fileUrl}` || report.fileUrl;
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = report.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('Download failed', err);
+      alert('Download failed');
+    }
+  };
+
+  const handleGenerateSummary = async (reportId: string) => {
+    if (!confirm('Generate summarized PDF for this report?')) return;
+    try {
+      setIsUploading(true);
+      await reportsAPI.generateSummary(reportId);
+
+      // Refresh reports
+      if (!activeMember) return;
+      const serverReports = await reportsAPI.getReports(activeMember.id);
+      const data = storage.getData();
+      data.reports = data.reports.filter(r => r.memberId !== activeMember.id).concat(serverReports as any);
+      storage.setData(data);
+
+      alert('Summary PDF generated and added to Reports.');
+    } catch (err) {
+      console.error('Summary generation failed', err);
+      alert('Summary generation failed. See console for details.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -171,6 +276,20 @@ export default function Reports() {
               </div>
 
               <div>
+                <Label htmlFor="file">Upload PDF / Image</Label>
+                <input
+                  id="file"
+                  type="file"
+                  accept="application/pdf,image/*"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  className="mt-2"
+                />
+                {selectedFile && (
+                  <div className="text-sm text-muted-foreground mt-2">Selected: {selectedFile.name}</div>
+                )}
+              </div>
+
+              <div>
                 <Label htmlFor="tags">Tags (comma-separated)</Label>
                 <Input
                   id="tags"
@@ -181,11 +300,14 @@ export default function Reports() {
               </div>
 
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); resetForm(); }}>
+                <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); resetForm(); setSelectedFile(null); }}>
                   Cancel
                 </Button>
                 <Button onClick={handleAddReport} disabled={!formData.title || !formData.date}>
                   Add Report
+                </Button>
+                <Button onClick={handleUploadAndParse} disabled={!selectedFile || !formData.date || !activeMember}>
+                  {isUploading ? 'Uploading...' : 'Upload & Parse'}
                 </Button>
               </div>
             </div>
@@ -222,6 +344,11 @@ export default function Reports() {
                         <Badge className={getTypeColor(report.type)}>
                           {report.type.charAt(0).toUpperCase() + report.type.slice(1)}
                         </Badge>
+                        {report.parsedData?.summary && (
+                          <Badge className={report.parsedData.alertLevel === 'red' ? 'bg-red-100 text-red-800' : report.parsedData.alertLevel === 'yellow' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
+                            {report.parsedData.alertLevel?.toUpperCase()}
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
                         <span className="flex items-center gap-1">
@@ -236,6 +363,35 @@ export default function Reports() {
                       {report.notes && (
                         <p className="text-sm text-muted-foreground mb-3">{report.notes}</p>
                       )}
+
+                      {report.parsedData && Object.keys(report.parsedData).length > 0 && (
+                        <div className="text-sm text-muted-foreground mb-3">
+                          <div className="flex items-center justify-between">
+                            <strong>Parsed:</strong>
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="ghost" onClick={() => handleTranslate(report.id, 'ta')}>
+                                Translate (Tamil)
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => copyOriginal(report)}>
+                                Copy Original
+                              </Button>
+                            </div>
+                          </div>
+                          <ul className="list-disc ml-5">
+                            {Object.entries(report.parsedData).slice(0,5).map(([k, v]) => (
+                              <li key={k}>{k}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}</li>
+                            ))}
+                          </ul>
+
+                          {report.translations?.ta && (
+                            <div className="mt-3 p-3 bg-slate-50 rounded">
+                              <strong>Translated (Tamil):</strong>
+                              <div className="text-sm mt-2 whitespace-pre-wrap">{report.translations.ta.text}</div>
+                              <div className="mt-2 text-xs text-muted-foreground">Translated fields: {Object.keys(report.translations.ta.parsedData || {}).length}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1">
                         {report.tags.map((tag, index) => (
                           <Badge key={index} variant="outline" className="text-xs">
@@ -245,13 +401,31 @@ export default function Reports() {
                       </div>
                     </div>
                     <div className="flex gap-2 ml-4">
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleViewReport(report)}>
                         <Eye className="h-4 w-4 mr-2" />
                         View
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleDownloadReport(report)}>
                         <Download className="h-4 w-4 mr-2" />
                         Download
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleGenerateSummary(report.id)}>
+                        Summary
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        if (!confirm('Send this report to Google Vertex AI (Gemini) to generate an advanced summary? This will send extracted text and parsed data to an external service. Proceed?')) return;
+                        // require explicit consent
+                        (async () => {
+                          try {
+                            await reportsAPI.summarizeLLM(report.id, true);
+                            alert('LLM summarization queued. It will run in background and the resulting PDF will appear in Reports when done.');
+                          } catch (err) {
+                            console.error('Failed to queue LLM summarize', err);
+                            alert('Failed to queue LLM summarize. See console for details.');
+                          }
+                        })();
+                      }}>
+                        LLM Summary
                       </Button>
                       <Button
                         variant="outline"

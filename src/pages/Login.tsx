@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Heart, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { reportsAPI } from '@/lib/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -16,6 +17,44 @@ export default function Login() {
     email: '',
     password: '',
   });
+
+  // Translation state for inline UI translation on this page
+  const [isTamil, setIsTamil] = useState(false);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const toggleTamil = async () => {
+    if (isTamil) {
+      setIsTamil(false);
+      return;
+    }
+
+    // Strings to translate (order matters)
+    const keys = ['title','description','emailLabel','emailPlaceholder','passwordLabel','forgotPassword','signIn','createAccount','footer'];
+    const texts = [
+      'Welcome Back',
+      'Sign in to access your health dashboard',
+      'Email',
+      'you@example.com',
+      'Password',
+      'Forgot password?',
+      'Sign In',
+      'Create one',
+      'Your data stays on this device. We never upload your health information.'
+    ];
+
+    try {
+      const res = await reportsAPI.translateText(texts, 'ta');
+      const translatedArr = res.translated || [];
+      const map: Record<string, string> = {};
+      keys.forEach((k, i) => { map[k] = translatedArr[i] || texts[i]; });
+      setTranslations(map);
+      setIsTamil(true);
+    } catch (err: any) {
+      console.error('Translation failed', err);
+      const msg = err?.message || (err?.error ? err.error : 'Translation failed');
+      toast.error(`Translation failed: ${msg}`);
+    }
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,26 +80,33 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md">
         {/* Logo */}
-        <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-          <Heart className="h-10 w-10 text-primary" />
-          <span className="font-bold text-2xl">HealthVault</span>
-        </Link>
+        <div className="flex items-center justify-between gap-2 mb-8">
+          <Link to="/" className="flex items-center justify-center gap-2">
+            <Heart className="h-10 w-10 text-primary" />
+            <span className="font-bold text-2xl">HealthVault</span>
+          </Link>
+          <div>
+            <Button size="sm" variant="ghost" onClick={toggleTamil}>
+              {isTamil ? 'English' : 'Translate (தமிழ்)'}
+            </Button>
+          </div>
+        </div>
 
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Welcome Back</CardTitle>
+            <CardTitle className="text-2xl">{isTamil ? translations.title ?? 'Welcome Back' : 'Welcome Back'}</CardTitle>
             <CardDescription>
-              Sign in to access your health dashboard
+              {isTamil ? translations.description ?? 'Sign in to access your health dashboard' : 'Sign in to access your health dashboard'}
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{isTamil ? translations.emailLabel ?? 'Email' : 'Email'}</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={isTamil ? translations.emailPlaceholder ?? 'you@example.com' : 'you@example.com'}
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
@@ -69,12 +115,12 @@ export default function Login() {
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password">{isTamil ? translations.passwordLabel ?? 'Password' : 'Password'}</Label>
                   <Link
                     to="/forgot-password"
                     className="text-sm text-primary hover:underline"
                   >
-                    Forgot password?
+                    {isTamil ? translations.forgotPassword ?? 'Forgot password?' : 'Forgot password?'}
                   </Link>
                 </div>
                 <Input
@@ -91,12 +137,12 @@ export default function Login() {
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Sign In
+                {isTamil ? translations.signIn ?? 'Sign In' : 'Sign In'}
               </Button>
               <p className="text-sm text-center text-muted-foreground">
-                Don't have an account?{' '}
+                {isTamil ? "Don't have an account?" : "Don't have an account?"}{' '}
                 <Link to="/register" className="text-primary hover:underline font-medium">
-                  Create one
+                  {isTamil ? translations.createAccount ?? 'Create one' : 'Create one'}
                 </Link>
               </p>
             </CardFooter>
@@ -104,7 +150,7 @@ export default function Login() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground mt-8">
-          Your data stays on this device. We never upload your health information.
+          {isTamil ? translations.footer ?? 'Your data stays on this device. We never upload your health information.' : 'Your data stays on this device. We never upload your health information.'}
         </p>
       </div>
     </div>
